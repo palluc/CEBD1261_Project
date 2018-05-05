@@ -1,0 +1,167 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+#========================================================
+#Course: CEBD1261 Big Data Infrstructure
+#By:     Luciana Palucci
+#========================================================
+
+
+```{r}
+# Define library packages to use and pre-install
+
+# These packages must be installed at first if not already installed.
+
+#install.packages("tidyverse", dependencies=TRUE)
+#install.packages("plotly")
+#install.packages("RCurl")
+  
+library(dplyr,verbose = getOption("verbose"))
+library(tidyr)    # for reshaping data
+library(scales)     # for scale_y_continuous(label = percent)
+library(ggthemes)   # for scale_fill_few('medium')
+library(ggplot2)    # plotting data
+library(ztable)     # format tables for reporting
+library(tidyverse)
+library(plotly)     # for interactive charts
+ 
+
+```
+# Read in Bureau of Transport Statistics dataset from
+# https://www.transtats.bts.gov/DL_SelectFields.asp?Table_ID=236&DB_Short_Name=On-Time
+
+```{r}
+#Pipeline the data into Rstudio
+
+#Get data from AWS to local copy of rstudio
+#Source: https://aws.amazon.com/blogs/big-data/running-r-on-aws/
+
+#library("RCurl") 
+#data <- read.table(getURL("https://ec2-54-237-132-222.compute-1.amazonaws.com/Data/On_Time_Performance_2018.csv"), sep=",", #header=FALSE)
+#head(data)
+
+```
+
+```{r}
+
+#read in the raw dataset
+airports <- read.csv("C:/Users/Luciana/CEBD1261/CEBD1261_Project/Data/On_Time_Performance_2018.csv", header = TRUE)
+
+# view summary for unusual data values
+summary(airports$DepTime)
+
+```
+
+#
+# Clean the dataset to exclude null values and time format that do not conform to standard, then add variable
+# to break time point into 15 min interval timepoint.
+#
+```{r}
+# Remove the rows by checking if not (!) an NA due to not meeting the date format
+temp<- airports[!is.na(strptime(airports$DepTime, format = "%H%M")),]
+
+class(temp$DepTime)
+
+#Split time series data into time intervals by every 15 minutes and then plot the count
+myDF<- mutate(temp, byGroup = as.matrix(cut(strptime(sub("(\\d+)(\\d{2})", "\\1:\\2", temp$DepTime), format = "%H:%M"), breaks="15 min") )) 
+
+# unique(myDF$byGroup) #check unique values
+
+# Extract time value from variable and make dataframes used for graphs and summary table
+
+myDF["Time"] <- NA # This creates the new column filled with "NA"
+myDF$Time <- strftime(as.POSIXlt(myDF$byGroup), format="%H:%M")
+
+```
+#
+# 1. Big Data Example
+# ===================================
+# Make dataframes used for graphs and summary table
+#
+```{r}
+
+# based on variable values
+ds1 <- myDF[ which(myDF$DayofMonth == 1 & myDF$OriginState=="NY"), ]
+
+ds1[with(ds1, order(Time)), ]
+
+```
+
+#
+# Plot the data using ggplot2 and pipes
+#
+```{r}
+
+# Prepare dataset and pipe the dataset into the graph
+graph1 <- ds1 %>%
+ggplot(aes(x = Time, y = Origin, group=OriginStateName, color = Carrier)) +
+      geom_point() +  scale_x_discrete(breaks=c("00:00", "11:00", "12:00", "14:00","16:00","18:00", "20:00","23:00")  ) 
+      labs(title = "New York State Airport Departures by Time Intervals",
+           subtitle = "*The data frame is sent to the plot using pipes",
+           y = "Airport Origin code",
+           x = "Departure Time") + theme_bw(base_size = 8) +
+      theme(axis.ticks = element_blank(), axis.text.x = element_blank())
+
+#printout graph #1
+graph1
+
+```
+# 
+# Turn the gplot into an interactive chart. 
+#
+```{r}
+
+ggplotly(graph1)
+
+```
+
+# 2. Sampling and BI Summary Example
+# ===================================
+# Count Distribution by State and Origin City of Airport Departures by Carrier
+#
+
+
+```{r}
+
+# Create dataset with overall count distributions
+
+ds2 <- myDF[ which(myDF$Carrier %in% c("9E","AA","AS","B6","DL","EV","F9")), ]
+
+dfr_prop <- ds2 %>% 
+  count(OriginState, Carrier) %>%  # group_by() & summarise(n=n()) are implicit
+  mutate(prop = prop.table(n))     # prop = n/sum(n) works too /  prop.table(n)
+
+as.data.frame(dfr_prop)            # print df
+
+```
+
+```{r}
+#Plot distribution percentage summary for month of January
+
+gg_prop <- ggplot(data = data.frame()
+                  , aes(x =OriginState, y = prop, fill = Carrier)) + 
+  geom_bar(stat = 'identity', position = 'stack', alpha = 2/3) +  
+  scale_y_continuous(labels = percent) +  
+  scale_x_discrete(breaks=c("AK", "CA","FL", "IL", "GA","LA","MI","MO","NC","OH", "NJ","NY","PA","TX","WY")  ) +
+  scale_fill_few('medium', drop = FALSE) +            # keep levels, if data is filtered
+  labs(x = 'State', y = NULL, fill = 'Carrier',
+       title = 'Distribution of Flights by State and Carrier for Month of January')  # title of graph
+
+gg_prop %+%   dfr_prop  
+
+```
+
+#
+# End of program.
+#
+
+
